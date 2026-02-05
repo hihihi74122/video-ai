@@ -17,18 +17,20 @@ except KeyError:
     st.error("🔒 Security Alert: HF_TOKEN not found.")
     st.stop()
 
-# We use LLaVA because the new Router endpoint /v1/chat/completions requires a Chat Model.
-MODEL_ID = "llava-hf/llava-1.5-7b-hf"
+# FIX: Switched to Llama-3.2-11B-Vision.
+# Reason: This model is fully supported by the Hugging Face Serverless provider you enabled.
+# LLaVA 1.5 is not supported by the providers you have active.
+MODEL_ID = "meta-llama/Llama-3.2-11B-Vision-Instruct"
 
-# --- FIX: Using the OpenAI-Compatible Chat Endpoint on the Router ---
+# URL remains the Router endpoint
 API_URL = "https://router.huggingface.co/v1/chat/completions"
 
 # -----------------------------------------------------------------------------
 # PAGE SETUP
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="Router Video AI", layout="centered")
-st.title("👁️ Video AI (Router Edition)")
-st.markdown("Using the new HuggingFace Router with OpenAI-compatible format.")
+st.set_page_config(page_title="Llama 3.2 Video AI", layout="centered")
+st.title("🦙 Llama 3.2 Video AI")
+st.markdown("Using the reliable Llama 3.2 Vision model via HuggingFace Router.")
 
 # -----------------------------------------------------------------------------
 # VIDEO PROCESSING FUNCTIONS
@@ -82,7 +84,7 @@ def extract_frames(video_path, num_frames=4):
 
 def ask_ai_router(image, question):
     """
-    Sends request to the HuggingFace Router using OpenAI-compatible format.
+    Sends request to HuggingFace Router using OpenAI format for Llama 3.2.
     """
     # 1. Convert Image to Base64
     buffered = io.BytesIO()
@@ -101,7 +103,7 @@ def ask_ai_router(image, question):
                 ]
             }
         ],
-        "max_tokens": 200
+        "max_tokens": 300
     }
     
     headers = {
@@ -116,12 +118,10 @@ def ask_ai_router(image, question):
             return "⏳ The AI is waking up. Wait 30 seconds and try again."
         
         if response.status_code != 200:
-            # Debugging info
             return f"API Error {response.status_code}: {response.text}"
 
         result = response.json()
         
-        # Parse standard OpenAI Chat response format
         if "choices" in result and len(result["choices"]) > 0:
             return result["choices"][0]["message"]["content"]
         else:
@@ -168,7 +168,7 @@ if st.button("Analyze Video"):
                     # Analyze the middle frame
                     middle_frame_index = len(frames) // 2
                     
-                    with st.spinner("AI is analyzing (via Router)..."):
+                    with st.spinner("AI is analyzing..."):
                         answer = ask_ai_router(frames[middle_frame_index], user_question)
                         
                         st.subheader("AI Answer")
