@@ -17,20 +17,20 @@ except KeyError:
     st.error("🔒 Security Alert: HF_TOKEN not found.")
     st.stop()
 
-# FIX: Switched to Llama-3.2-11B-Vision.
-# Reason: This model is fully supported by the Hugging Face Serverless provider you enabled.
-# LLaVA 1.5 is not supported by the providers you have active.
-MODEL_ID = "meta-llama/Llama-3.2-11B-Vision-Instruct"
+# FINAL FIX: Using Idefics 2.
+# 1. It is created by Hugging Face, so it is definitely on the free "Serverless" provider.
+# 2. It supports Chat Completions (OpenAI format).
+# 3. It is smarter than BLIP-2 and more reliable than LLaVA on the free tier.
+MODEL_ID = "HuggingFaceM4/idefics2-8b-chatty"
 
-# URL remains the Router endpoint
 API_URL = "https://router.huggingface.co/v1/chat/completions"
 
 # -----------------------------------------------------------------------------
 # PAGE SETUP
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="Llama 3.2 Video AI", layout="centered")
-st.title("🦙 Llama 3.2 Video AI")
-st.markdown("Using the reliable Llama 3.2 Vision model via HuggingFace Router.")
+st.set_page_config(page_title="Idefics Video AI", layout="centered")
+st.title("🤖 Idefics 2 Video AI")
+st.markdown("Using HuggingFace's own Idefics 2 model for maximum stability.")
 
 # -----------------------------------------------------------------------------
 # VIDEO PROCESSING FUNCTIONS
@@ -84,7 +84,7 @@ def extract_frames(video_path, num_frames=4):
 
 def ask_ai_router(image, question):
     """
-    Sends request to HuggingFace Router using OpenAI format for Llama 3.2.
+    Sends request to HuggingFace Router for Idefics 2.
     """
     # 1. Convert Image to Base64
     buffered = io.BytesIO()
@@ -122,6 +122,7 @@ def ask_ai_router(image, question):
 
         result = response.json()
         
+        # Parse standard OpenAI Chat response format
         if "choices" in result and len(result["choices"]) > 0:
             return result["choices"][0]["message"]["content"]
         else:
@@ -168,7 +169,7 @@ if st.button("Analyze Video"):
                     # Analyze the middle frame
                     middle_frame_index = len(frames) // 2
                     
-                    with st.spinner("AI is analyzing..."):
+                    with st.spinner("AI is analyzing (Idefics 2)..."):
                         answer = ask_ai_router(frames[middle_frame_index], user_question)
                         
                         st.subheader("AI Answer")
