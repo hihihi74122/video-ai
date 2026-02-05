@@ -21,7 +21,7 @@ except KeyError:
     st.stop()
 
 # Using a reliable open-source Vision Model
-MODEL_ID = "Salesforce/blip2-opt-2.7b"
+MODEL_ID = "llava-hf/llava-1.5-7b-hf"
 
 # -----------------------------------------------------------------------------
 # PAGE SETUP
@@ -188,4 +188,5 @@ if st.button("Analyze Video"):
             except Exception as e:
                 # If cleanup fails, log it but don't crash the app
                 print(f"Cleanup error: {e}")
+
 
