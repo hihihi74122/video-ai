@@ -2,9 +2,12 @@ import streamlit as st
 import os
 import cv2
 import yt_dlp
-from huggingface_hub import InferenceClient
 from PIL import Image
+import io
+import base64
 import uuid
+import requests
+import json
 
 # -----------------------------------------------------------------------------
 # CONFIGURATION & SECRETS
@@ -15,23 +18,16 @@ except KeyError:
     st.error("🔒 Security Alert: HF_TOKEN not found.")
     st.stop()
 
-# CHANGE LOG: Switched to BLIP-2.
-# Reason: It is the most stable model on the free HuggingFace Inference API.
-# It is not a "chat" model, so we use text_generation instead.
+# We use BLIP-2 again, but we will talk to it directly using requests
 MODEL_ID = "Salesforce/blip2-opt-2.7b"
+API_URL = f"https://api-inference.huggingface.co/models/{MODEL_ID}"
 
 # -----------------------------------------------------------------------------
 # PAGE SETUP
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="Stable Video AI", layout="centered")
-st.title("👁️ Stable Video AI (BLIP-2)")
-st.markdown("Uses the reliable BLIP-2 model to analyze video frames.")
-
-@st.cache_resource
-def get_client():
-    return InferenceClient(token=HF_TOKEN)
-
-client = get_client()
+st.set_page_config(page_title="Raw API Video AI", layout="centered")
+st.title("👁️ Video AI (Direct API)")
+st.markdown("Using direct HTTP requests for maximum stability.")
 
 # -----------------------------------------------------------------------------
 # VIDEO PROCESSING FUNCTIONS
@@ -69,7 +65,6 @@ def extract_frames(video_path, num_frames=4):
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if total_frames == 0:
             return []
-
         indices = [int(i * total_frames / num_frames) for i in range(num_frames)]
         for idx in indices:
             cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
@@ -82,26 +77,51 @@ def extract_frames(video_path, num_frames=4):
         cap.release()
     return frames
 
-def ask_ai(image, question):
+def ask_ai_direct(image, question):
     """
-    FIXED FUNCTION:
-    BLIP-2 is NOT a chat model. It uses 'text_generation'.
-    We pass the PIL image directly.
+    Uses standard 'requests' library to query Hugging Face Inference API directly.
+    This bypasses the InferenceClient wrapper issues.
     """
-    # BLIP-2 specific prompt format
-    prompt = f"Question: {question} Answer:"
+    # 1. Convert PIL Image to Base64 String
+    buffered = io.BytesIO()
+    image.save(buffered, format="JPEG")
+    img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
     
+    # 2. Prepare the payload for BLIP-2
+    # BLIP-2 expects a JSON with 'image' and 'text' inside 'inputs'
+    payload = {
+        "inputs": {
+            "image": f"data:image/jpeg;base64,{img_str}",
+            "text": question
+        }
+    }
+    
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
     try:
-        # We use text_generation and pass the image directly
-        response = client.text_generation(
-            model=MODEL_ID,
-            prompt=prompt,
-            image=image,  # Passing the PIL image object directly
-            max_new_tokens=100
-        )
-        return response
+        response = requests.post(API_URL, headers=headers, json=payload)
+        
+        if response.status_code == 503:
+            return "Model is loading (cold start). Please wait 30 seconds and try again."
+        
+        response.raise_for_status()
+        
+        # Parse result (usually returns a list with one dict containing 'generated_text')
+        result = response.json()
+        
+        # Handling different return formats from HF API
+        if isinstance(result, list):
+            return result[0].get("generated_text", str(result))
+        elif isinstance(result, dict):
+            return result.get("generated_text", str(result))
+        else:
+            return str(result)
+
     except Exception as e:
-        return f"AI Error: {str(e)}"
+        return f"API Request Error: {str(e)}"
 
 # -----------------------------------------------------------------------------
 # MAIN UI
@@ -138,7 +158,7 @@ if st.button("Analyze"):
 
                     with st.spinner("AI is analyzing..."):
                         # Analyze first frame
-                        answer = ask_ai(frames[0], user_question)
+                        answer = ask_ai_direct(frames[0], user_question)
                         
                         st.subheader("AI Answer")
                         st.info(answer)
