@@ -17,17 +17,15 @@ except KeyError:
     st.error("🔒 Security Alert: HF_TOKEN not found.")
     st.stop()
 
-# FINAL FIX: Using the EXACT model name from your whitelist.
 MODEL_ID = "Qwen/Qwen2.5-VL-72B-Instruct"
-
 API_URL = "https://router.huggingface.co/v1/chat/completions"
 
 # -----------------------------------------------------------------------------
 # PAGE SETUP
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="High-Speed Video AI", layout="centered")
-st.title("👀 High-Speed Video AI")
-st.markdown("Using Qwen 2.5 VL (72B) for maximum intelligence.")
+st.set_page_config(page_title="True Video AI", layout="centered")
+st.title("👁️ True Video AI")
+st.markdown("Now analyzes a **sequence** of frames to understand movement.")
 
 # -----------------------------------------------------------------------------
 # VIDEO PROCESSING FUNCTIONS
@@ -57,73 +55,67 @@ def download_video(url):
         return None
 
 def extract_frames_by_interval(video_path, interval_seconds, max_frames=20):
-    """
-    Extracts frames based on time interval.
-    Now supports sub-second intervals (e.g., 0.5s = 2 fps).
-    Hard caps at 20 frames to prevent API crashes.
-    """
     cap = cv2.VideoCapture(video_path)
     frames = []
-    
     try:
         if not cap.isOpened():
             return []
-            
         fps = cap.get(cv2.CAP_PROP_FPS)
-        if fps == 0:
-            return []
-
-        # Calculate frames to skip (allow decimals for precision)
+        if fps == 0: return []
+        
         frame_skip_float = fps * interval_seconds
         current_frame = 0.0
         
         while True:
-            # Check if we reached the next snapshot time
-            # We use int() because OpenCV requires integer frame indices
             frame_idx = int(current_frame)
-            
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
+            if not ret: break
             
-            if not ret:
-                break
-            
-            # Save frame
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             pil_image = Image.fromarray(frame_rgb)
             frames.append(pil_image)
             
-            # Stop if we hit the safety limit
             if len(frames) >= max_frames:
-                st.info(f"Reached maximum snapshot limit ({max_frames}) to prevent server errors.")
                 break
             
-            # Advance time
             current_frame += frame_skip_float
-            
     finally:
         cap.release()
-    
     return frames
 
-def ask_ai_qwen(image, question):
+def ask_ai_sequence(images, question):
     """
-    Sends request for Qwen2.5-VL-72B.
-    Increased timeout because 72B models are slower.
+    FIX: Sends MULTIPLE images to the AI to simulate video.
+    We send the last N images (e.g., 8) so the AI can see the transition.
     """
-    buffered = io.BytesIO()
-    image.save(buffered, format="JPEG")
-    img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+    
+    # 1. Prepare the Content List
+    content = [
+        {
+            "type": "text", 
+            "text": f"These are sequential frames from a video. Analyze the movement, action, and changes across these frames. Answer this question: {question}"
+        }
+    ]
+    
+    # 2. Add images to the content
+    # We limit to last 8 images to prevent API token/size errors while still seeing motion
+    images_to_send = images[-8:] if len(images) > 8 else images
+    
+    for img in images_to_send:
+        buffered = io.BytesIO()
+        img.save(buffered, format="JPEG")
+        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        content.append(
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}}
+        )
     
     payload = {
         "model": MODEL_ID,
         "messages": [
             {
                 "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}},
-                    {"type": "text", "text": question}
-                ]
+                "content": content
             }
         ],
         "max_tokens": 500
@@ -135,11 +127,11 @@ def ask_ai_qwen(image, question):
     }
 
     try:
-        # Increased timeout to 120s for the heavy 72B model
+        # Increased timeout for multiple images
         response = requests.post(API_URL, headers=headers, json=payload, timeout=120)
         
         if response.status_code == 503:
-            return "⏳ The AI is loading (Cold Start). Wait 1 minute and try again."
+            return "⏳ AI is loading... wait 1 minute."
         
         if response.status_code != 200:
             return f"API Error {response.status_code}: {response.text}"
@@ -158,13 +150,11 @@ def ask_ai_qwen(image, question):
 # MAIN UI
 # -----------------------------------------------------------------------------
 
-# Slider now goes down to 0.1 seconds (10 frames per second)
-# step=0.1 allows precise control
 interval = st.slider("Snapshot Interval (seconds)", 0.1, 5.0, 1.0, step=0.1)
-st.caption(f"Capturing every {interval} seconds. (Lower = more detail, Max 20 snapshots total).")
+st.caption("Shorter interval = more frames. The AI analyzes the last sequence of frames.")
 
 video_url = st.text_input("Video Link:", placeholder="https://www.youtube.com/watch?v=...")
-user_question = st.text_input("Question:", placeholder="What is happening in the video?")
+user_question = st.text_input("Question:", placeholder="What action is happening in the video?")
 
 if st.button("Analyze Video"):
     if not video_url or not user_question:
@@ -193,13 +183,11 @@ if st.button("Analyze Video"):
                         col_idx = i % 4
                         cols[col_idx].image(img, caption=f"{i*interval:.1f}s", use_column_width=True)
 
-                    # Analyze the LAST frame
-                    last_frame = frames[-1]
-                    
-                    with st.spinner("AI is analyzing (Qwen 72B)..."):
-                        answer = ask_ai_qwen(last_frame, user_question)
+                    # Analyze the SEQUENCE
+                    with st.spinner(f"AI analyzing the last {min(8, len(frames))} frames for movement..."):
+                        answer = ask_ai_sequence(frames, user_question)
                         
-                        st.subheader("AI Answer")
+                        st.subheader("AI Answer (Motion Analysis)")
                         st.info(answer)
 
             try:
