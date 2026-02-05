@@ -17,17 +17,18 @@ except KeyError:
     st.error("🔒 Security Alert: HF_TOKEN not found.")
     st.stop()
 
-MODEL_ID = "Salesforce/blip2-opt-2.7b"
+# We use LLaVA because the new Router endpoint /v1/chat/completions requires a Chat Model.
+MODEL_ID = "llava-hf/llava-1.5-7b-hf"
 
-# --- FIX: Updated to the new Hugging Face Router URL ---
-API_URL = f"https://router.huggingface.co/models/{MODEL_ID}"
+# --- FIX: Using the OpenAI-Compatible Chat Endpoint on the Router ---
+API_URL = "https://router.huggingface.co/v1/chat/completions"
 
 # -----------------------------------------------------------------------------
 # PAGE SETUP
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="Video AI Pro", layout="centered")
-st.title("👁️ Video AI Pro")
-st.markdown("Select how many frames to analyze for better understanding.")
+st.set_page_config(page_title="Router Video AI", layout="centered")
+st.title("👁️ Video AI (Router Edition)")
+st.markdown("Using the new HuggingFace Router with OpenAI-compatible format.")
 
 # -----------------------------------------------------------------------------
 # VIDEO PROCESSING FUNCTIONS
@@ -79,22 +80,28 @@ def extract_frames(video_path, num_frames=4):
         cap.release()
     return frames
 
-def ask_ai_direct(image, question):
+def ask_ai_router(image, question):
     """
-    Uses the new Router URL and the correct BLIP-2 payload structure.
+    Sends request to the HuggingFace Router using OpenAI-compatible format.
     """
-    # 1. Convert to Base64
+    # 1. Convert Image to Base64
     buffered = io.BytesIO()
     image.save(buffered, format="JPEG")
     img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
     
-    # 2. BLIP-2 prompt format
-    prompt_text = f"Question: {question} Answer:"
-    
-    # 3. Payload
+    # 2. Construct OpenAI-Style Payload
     payload = {
-        "inputs": prompt_text,
-        "image": f"data:image/jpeg;base64,{img_str}"
+        "model": MODEL_ID,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}},
+                    {"type": "text", "text": question}
+                ]
+            }
+        ],
+        "max_tokens": 200
     }
     
     headers = {
@@ -103,22 +110,20 @@ def ask_ai_direct(image, question):
     }
 
     try:
-        # Sending request to the NEW router URL
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
         
         if response.status_code == 503:
-            return "⏳ The AI is waking up. Wait 20 seconds and try again."
+            return "⏳ The AI is waking up. Wait 30 seconds and try again."
         
         if response.status_code != 200:
+            # Debugging info
             return f"API Error {response.status_code}: {response.text}"
 
         result = response.json()
         
-        # Parse result safely
-        if isinstance(result, list) and len(result) > 0:
-            return result[0].get("generated_text", str(result))
-        elif isinstance(result, dict):
-            return result.get("generated_text", str(result))
+        # Parse standard OpenAI Chat response format
+        if "choices" in result and len(result["choices"]) > 0:
+            return result["choices"][0]["message"]["content"]
         else:
             return str(result)
 
@@ -129,9 +134,7 @@ def ask_ai_direct(image, question):
 # MAIN UI
 # -----------------------------------------------------------------------------
 
-num_frames = st.slider("How many frames to analyze?", 1, 16, 4)
-st.caption("More frames = better understanding.")
-
+num_frames = st.slider("Frames to analyze", 1, 16, 4)
 video_url = st.text_input("Video Link:", placeholder="https://www.youtube.com/watch?v=...")
 user_question = st.text_input("Question:", placeholder="What is happening?")
 
@@ -154,7 +157,7 @@ if st.button("Analyze Video"):
                 frames = extract_frames(video_file, num_frames=num_frames)
 
                 if not frames:
-                    st.error("Could not read frames from video.")
+                    st.error("Could not read frames.")
                 else:
                     st.subheader(f"Visual Context ({len(frames)} Frames)")
                     cols = st.columns(min(4, len(frames)))
@@ -165,8 +168,8 @@ if st.button("Analyze Video"):
                     # Analyze the middle frame
                     middle_frame_index = len(frames) // 2
                     
-                    with st.spinner("AI is analyzing the middle frame..."):
-                        answer = ask_ai_direct(frames[middle_frame_index], user_question)
+                    with st.spinner("AI is analyzing (via Router)..."):
+                        answer = ask_ai_router(frames[middle_frame_index], user_question)
                         
                         st.subheader("AI Answer")
                         st.info(answer)
