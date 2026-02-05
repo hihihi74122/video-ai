@@ -185,3 +185,4 @@ if st.button("Analyze Video"):
                     os.remove(video_file)
             except:
                 pass
+
