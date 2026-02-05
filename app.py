@@ -108,7 +108,8 @@ if st.button("Analyze"):
     else:
         # 1. Download
         with st.spinner("Downloading video..."):
-            video_file = download_video(url)
+            # FIX: Changed 'url' to 'video_url' here
+            video_file = download_video(video_url)
         
         if video_file and os.path.exists(video_file):
             # 2. Extract Frames
