@@ -20,7 +20,7 @@ except KeyError:
 
 # We use BLIP-2 again, but we will talk to it directly using requests
 MODEL_ID = "Salesforce/blip2-opt-2.7b"
-API_URL = f"https://api-inference.huggingface.co/models/{MODEL_ID}"
+API_URL = f"https://router.huggingface.co//models/{MODEL_ID}"
 
 # -----------------------------------------------------------------------------
 # PAGE SETUP
@@ -168,3 +168,4 @@ if st.button("Analyze"):
                     os.remove(video_file)
             except:
                 pass
+
