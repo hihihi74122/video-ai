@@ -20,12 +20,15 @@ except KeyError:
 MODEL_ID = "Qwen/Qwen2.5-VL-72B-Instruct"
 API_URL = "https://router.huggingface.co/v1/chat/completions"
 
+# HARD LIMIT: The Router only allows 4 images per request for this model.
+MAX_IMAGES = 4
+
 # -----------------------------------------------------------------------------
 # PAGE SETUP
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="True Video AI", layout="centered")
-st.title("👁️ True Video AI")
-st.markdown("Now analyzes a **sequence** of frames to understand movement.")
+st.set_page_config(page_title="Smart Video Focus", layout="centered")
+st.title("🎯 Smart Video Focus")
+st.markdown("Due to API limits, we analyze 4 consecutive frames from a specific section.")
 
 # -----------------------------------------------------------------------------
 # VIDEO PROCESSING FUNCTIONS
@@ -54,7 +57,11 @@ def download_video(url):
         st.error(f"Download Failed: {str(e)}")
         return None
 
-def extract_frames_by_interval(video_path, interval_seconds, max_frames=20):
+def extract_frames_by_interval(video_path, interval_seconds, max_total_frames=20):
+    """
+    Extracts up to 20 frames total.
+    We extract more than 4 so we can choose the 'best' 4 later.
+    """
     cap = cv2.VideoCapture(video_path)
     frames = []
     try:
@@ -76,7 +83,7 @@ def extract_frames_by_interval(video_path, interval_seconds, max_frames=20):
             pil_image = Image.fromarray(frame_rgb)
             frames.append(pil_image)
             
-            if len(frames) >= max_frames:
+            if len(frames) >= max_total_frames:
                 break
             
             current_frame += frame_skip_float
@@ -86,23 +93,17 @@ def extract_frames_by_interval(video_path, interval_seconds, max_frames=20):
 
 def ask_ai_sequence(images, question):
     """
-    FIX: Sends MULTIPLE images to the AI to simulate video.
-    We send the last N images (e.g., 8) so the AI can see the transition.
+    Sends exactly 4 images (or less) to the API.
     """
-    
-    # 1. Prepare the Content List
     content = [
         {
             "type": "text", 
-            "text": f"These are sequential frames from a video. Analyze the movement, action, and changes across these frames. Answer this question: {question}"
+            "text": f"These are 4 sequential frames from a video. Analyze the movement and action in this short clip to answer: {question}"
         }
     ]
     
-    # 2. Add images to the content
-    # We limit to last 8 images to prevent API token/size errors while still seeing motion
-    images_to_send = images[-8:] if len(images) > 8 else images
-    
-    for img in images_to_send:
+    # Add images
+    for img in images:
         buffered = io.BytesIO()
         img.save(buffered, format="JPEG")
         img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
@@ -127,7 +128,6 @@ def ask_ai_sequence(images, question):
     }
 
     try:
-        # Increased timeout for multiple images
         response = requests.post(API_URL, headers=headers, json=payload, timeout=120)
         
         if response.status_code == 503:
@@ -150,13 +150,21 @@ def ask_ai_sequence(images, question):
 # MAIN UI
 # -----------------------------------------------------------------------------
 
-interval = st.slider("Snapshot Interval (seconds)", 0.1, 5.0, 1.0, step=0.1)
-st.caption("Shorter interval = more frames. The AI analyzes the last sequence of frames.")
+st.info("ℹ️ **Limit:** The API only allows analyzing 4 images at once.")
+
+# 1. User selects which part of the video to watch
+focus_section = st.selectbox(
+    "Which part of the video should the AI watch?",
+    ("End of Video (Conclusion)", "Start of Video (Introduction)", "Middle of Video")
+)
+
+# 2. Interval setting
+interval = st.slider("Snapshot Interval (seconds)", 0.1, 5.0, 0.5, step=0.1)
 
 video_url = st.text_input("Video Link:", placeholder="https://www.youtube.com/watch?v=...")
-user_question = st.text_input("Question:", placeholder="What action is happening in the video?")
+user_question = st.text_input("Question:", placeholder="What is happening in this part of the video?")
 
-if st.button("Analyze Video"):
+if st.button("Analyze Section"):
     if not video_url or not user_question:
         st.warning("Please provide both a URL and a question.")
     else:
@@ -171,24 +179,43 @@ if st.button("Analyze Video"):
                 st.stop()
 
         if video_file:
-            with st.spinner(f"Extracting frames every {interval} seconds..."):
-                frames = extract_frames_by_interval(video_file, interval_seconds=interval)
+            # 1. Extract all potential frames
+            with st.spinner(f"Extracting frames..."):
+                all_frames = extract_frames_by_interval(video_file, interval_seconds=interval)
 
-                if not frames:
-                    st.error("Could not read frames.")
+            if not all_frames:
+                st.error("Could not read frames.")
+            else:
+                # 2. Select the 4 frames based on user choice
+                selected_frames = []
+                
+                if focus_section == "End of Video (Conclusion)":
+                    # Take last 4 frames
+                    selected_frames = all_frames[-MAX_IMAGES:]
+                elif focus_section == "Start of Video (Introduction)":
+                    # Take first 4 frames
+                    selected_frames = all_frames[:MAX_IMAGES]
                 else:
-                    st.subheader(f"Visual Context ({len(frames)} Snapshots)")
-                    cols = st.columns(4)
-                    for i, img in enumerate(frames):
-                        col_idx = i % 4
-                        cols[col_idx].image(img, caption=f"{i*interval:.1f}s", use_column_width=True)
+                    # Take middle 4 frames
+                    mid_index = len(all_frames) // 2
+                    selected_frames = all_frames[mid_index-2 : mid_index+2]
+                
+                # Fallback if video is too short
+                if len(selected_frames) == 0:
+                    selected_frames = all_frames
 
-                    # Analyze the SEQUENCE
-                    with st.spinner(f"AI analyzing the last {min(8, len(frames))} frames for movement..."):
-                        answer = ask_ai_sequence(frames, user_question)
-                        
-                        st.subheader("AI Answer (Motion Analysis)")
-                        st.info(answer)
+                # 3. Display
+                st.subheader(f"Visual Context ({len(selected_frames)} Frames - {focus_section})")
+                cols = st.columns(len(selected_frames))
+                for i, img in enumerate(selected_frames):
+                    cols[i].image(img, caption=f"Frame {i+1}", use_column_width=True)
+
+                # 4. Analyze
+                with st.spinner("AI is analyzing this section..."):
+                    answer = ask_ai_sequence(selected_frames, user_question)
+                    
+                    st.subheader("AI Answer")
+                    st.info(answer)
 
             try:
                 if os.path.exists(video_file):
